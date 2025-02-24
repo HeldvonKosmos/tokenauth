@@ -81,6 +81,10 @@ services:
       - "--api.insecure=true"
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
+  
+      ## you can enable the plugin by adding the following label
+      - "--experimental.plugins.tokenauth.moduleName=github.com/Clasyc/tokenauth"
+      - "--experimental.plugins.tokenauth.version=v0.1.0"
     ports:
       - "80:80"
     volumes:
