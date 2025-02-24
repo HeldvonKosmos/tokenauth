@@ -1,0 +1,11 @@
+displayName: Token Authentication
+type: middleware
+import: github.com/Clasyc/tokenauth
+summary: Token-based authentication middleware
+iconPath: ./icon.png
+testData:
+  tokenParam: ta_token
+  cookieName: ta_session_token
+  allowedTokens:
+    - secret-token-1
+    - secret-token-1
