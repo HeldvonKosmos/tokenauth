@@ -1,3 +1,3 @@
-module github.com/Clasyc/tokenauth
+module github.com/HeldvonKosmos/tokenauth
 
 go 1.23
