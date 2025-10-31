@@ -2,116 +2,84 @@ package tokenauth
 
 import (
 	"context"
+	"crypto/hmac" // For secure comparison
 	"net/http"
-	"net/url"
 )
 
-const (
-	TokenKey  = "ta_token"
-	CookieKey = "ta_session_token"
-)
-
-// Config holds the middleware configuration
+// Config holds the plugin configuration.
 type Config struct {
-	TokenParam    string   `json:"tokenParam,omitempty"`
-	CookieName    string   `json:"cookieName,omitempty"`
+	// AllowedTokens holds the list of secret API keys (without the "Bearer " prefix).
 	AllowedTokens []string `json:"allowedTokens,omitempty"`
 }
 
-// CreateConfig creates and initializes the config with default values
+// CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
-	return &Config{
-		TokenParam: TokenKey,
-		CookieName: CookieKey,
-	}
+	return &Config{}
 }
 
+// tokenAuth holds the middleware state.
 type tokenAuth struct {
-	next          http.Handler
-	name          string
-	tokenParam    string
-	cookieName    string
-	allowedTokens []string
+	next           http.Handler
+	name           string
+	// allowedHeaders stores the full "Bearer <token>" strings for comparison.
+	allowedHeaders []string
 }
 
-// New creates and returns a new token authentication middleware
+// New creates a new tokenAuth middleware.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	if len(config.TokenParam) == 0 {
-		config.TokenParam = TokenKey
+	if len(config.AllowedTokens) == 0 {
+		// Note: No tokens configured, middleware will block all requests.
 	}
-	if len(config.CookieName) == 0 {
-		config.CookieName = CookieKey
+
+	// Build the list of full, expected header values
+	headers := make([]string, len(config.AllowedTokens))
+	for i, token := range config.AllowedTokens {
+		headers[i] = "Bearer " + token
 	}
 
 	return &tokenAuth{
-		next:          next,
-		name:          name,
-		tokenParam:    config.TokenParam,
-		cookieName:    config.CookieName,
-		allowedTokens: config.AllowedTokens,
+		next:           next,
+		name:           name,
+		allowedHeaders: headers,
 	}, nil
 }
 
+// ServeHTTP checks the Authorization header and blocks or forwards the request.
 func (t *tokenAuth) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	// Check for existing session cookie
-	cookie, err := req.Cookie(t.cookieName)
-	if err == nil && t.isTokenValid(cookie.Value) {
-		// Valid session exists, proceed
+	// Get the Authorization header from the request.
+	authHeader := req.Header.Get("Authorization")
+
+	// Check if the received header is in our list of allowed headers.
+	if t.isTokenValid(authHeader) {
+		// --- Success ---
+		// Token is valid, forward the request.
 		t.next.ServeHTTP(rw, req)
 		return
 	}
 
-	// Check for token in query parameters
-	token := req.URL.Query().Get(t.tokenParam)
-	if token == "" {
-		http.Error(rw, "Unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Validate token
-	if !t.isTokenValid(token) {
-		http.Error(rw, "Invalid token", http.StatusUnauthorized)
-		return
-	}
-
-	// Set session cookie
-	cookie = &http.Cookie{
-		Name:     t.cookieName,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	}
-	http.SetCookie(rw, cookie)
-
-	// Remove token from URL
-	q := req.URL.Query()
-	q.Del(t.tokenParam)
-	req.URL.RawQuery = q.Encode()
-
-	// Create new URL without token parameter
-	newURL := &url.URL{
-		Scheme:   req.URL.Scheme,
-		Host:     req.URL.Host,
-		Path:     req.URL.Path,
-		RawQuery: q.Encode(),
-	}
-
-	// Redirect to clean URL
-	http.Redirect(rw, req, newURL.String(), http.StatusTemporaryRedirect)
+	// --- Failure ---
+	// Token is missing or invalid.
+	rw.Header().Set("WWW-Authenticate", "Bearer realm=\"Restricted\"")
+	http.Error(rw, "Unauthorized", http.StatusUnauthorized)
 }
 
-// isTokenValid checks if the token is in the list of allowed tokens
-func (t *tokenAuth) isTokenValid(token string) bool {
-	if len(t.allowedTokens) == 0 {
-		return false
+// isTokenValid securely checks the received header against the allowed list.
+func (t *tokenAuth) isTokenValid(receivedHeader string) bool {
+	if len(t.allowedHeaders) == 0 || receivedHeader == "" {
+		return false // No tokens configured or no header received
 	}
 
-	for _, allowedToken := range t.allowedTokens {
-		if token == allowedToken {
+	receivedHeaderBytes := []byte(receivedHeader)
+
+	// Iterate over all allowed headers
+	for _, allowedHeader := range t.allowedHeaders {
+		// Use hmac.Equal for constant-time comparison
+		// to prevent timing attacks.
+		if hmac.Equal(receivedHeaderBytes, []byte(allowedHeader)) {
 			return true
 		}
 	}
+
+	// No matching token found
 	return false
 }
