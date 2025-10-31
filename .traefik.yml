@@ -1,6 +1,6 @@
 displayName: Token Authentication
 type: middleware
-import: github.com/Clasyc/tokenauth
+import: github.com/HeldvonKosmos/tokenauth
 summary: Token-based authentication middleware
 iconPath: ./icon.png
 testData:
